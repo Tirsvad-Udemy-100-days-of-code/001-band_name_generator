@@ -40,15 +40,28 @@ jobs:
                       f"API request failed with HTTP {error.code} ({error.reason})"
                   ) from None
 
-          credentials = json.loads(os.environ["GITHUB_CREDENTIALS"])
+          raw_credentials = os.environ.get("GITHUB_CREDENTIALS", "").strip()
+          if not raw_credentials:
+              raise RuntimeError("CREDENTIALS_FOR_GITHUB is missing or empty.")
+
+          try:
+              credentials = json.loads(raw_credentials)
+          except json.JSONDecodeError:
+              raise RuntimeError(
+                  "CREDENTIALS_FOR_GITHUB must contain valid JSON."
+              ) from None
+
+          if not isinstance(credentials, dict):
+              raise RuntimeError(
+                  "CREDENTIALS_FOR_GITHUB must be a JSON object."
+              )
+
           github_token = credentials.get("GITHUB_PAT")
           github_user = credentials.get("GITHUB_USER")
-
           if not github_token or not github_user:
               raise RuntimeError(
                   "CREDENTIALS_FOR_GITHUB must contain GITHUB_PAT and GITHUB_USER."
               )
-
           source_owner, separator, source_repo = os.environ[
               "SOURCE_REPOSITORY"
           ].partition("/")
