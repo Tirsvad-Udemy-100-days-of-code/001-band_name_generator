@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "band-name-generator"
+version = "0.1.0"
+description = "Day 1 of 100 Days of Code: suggest a band name from a hometown and a pet's name."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+band-name-generator = "band_name_generator.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
