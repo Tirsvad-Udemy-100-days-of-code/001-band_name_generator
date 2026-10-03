@@ -16,12 +16,12 @@ jobs:
           GITEA_TOKEN: ${{ gitea.token }}
           SOURCE_REPOSITORY: ${{ gitea.repository }}
           GITHUB_CREDENTIALS: ${{ secrets.CREDENTIALS_FOR_GITHUB }}
-          GITHUB_REPO: Tirsvad-Udemy-100_days_of_code
         run: |
           python3 - <<'PY'
           import json
           import os
           import urllib.error
+          import urllib.parse
           import urllib.request
 
           def request_json(url, method="GET", headers=None, body=None):
@@ -57,11 +57,11 @@ jobs:
               )
 
           github_token = credentials.get("GITHUB_PAT")
-          github_user = credentials.get("GITHUB_USER")
-          if not github_token or not github_user:
+          if not isinstance(github_token, str) or not github_token.strip():
               raise RuntimeError(
-                  "CREDENTIALS_FOR_GITHUB must contain GITHUB_PAT and GITHUB_USER."
+                  "CREDENTIALS_FOR_GITHUB must contain a non-empty GITHUB_PAT."
               )
+
           source_owner, separator, source_repo = os.environ[
               "SOURCE_REPOSITORY"
           ].partition("/")
@@ -69,23 +69,53 @@ jobs:
               raise RuntimeError("Could not determine the Gitea source repository.")
 
           gitea_api_url = os.environ["GITEA_API_URL"].rstrip("/")
-          source_url = (
-              f"{gitea_api_url}/repos/{source_owner}/{source_repo}"
+          source_url = f"{gitea_api_url}/repos/{source_owner}/{source_repo}"
+          gitea_headers = {
+              "Authorization": f"token {os.environ['GITEA_TOKEN']}",
+              "Accept": "application/json",
+          }
+          source = request_json(source_url, headers=gitea_headers)
+          mirrors = request_json(
+              f"{source_url}/push_mirrors",
+              headers=gitea_headers,
           )
-          source = request_json(
-              source_url,
-              headers={
-                  "Authorization": f"token {os.environ['GITEA_TOKEN']}",
-                  "Accept": "application/json",
-              },
-          )
+          if not isinstance(mirrors, list):
+              raise RuntimeError("Gitea returned an invalid push mirror list.")
 
-          github_repo = os.environ["GITHUB_REPO"]
+          github_targets = []
+          for mirror in mirrors:
+              remote_address = mirror.get("remote_address", "")
+              if remote_address.startswith("git@github.com:"):
+                  mirror_path = remote_address.split(":", 1)[1]
+              else:
+                  parsed_remote = urllib.parse.urlsplit(remote_address)
+                  if parsed_remote.hostname != "github.com":
+                      continue
+                  mirror_path = parsed_remote.path.lstrip("/")
+
+              mirror_path = mirror_path.removesuffix(".git").strip("/")
+              path_parts = mirror_path.split("/")
+              if len(path_parts) != 2 or not all(path_parts):
+                  raise RuntimeError(
+                      "Could not determine the GitHub owner and repository "
+                      "from a configured push mirror."
+                  )
+              github_targets.append(tuple(path_parts))
+
+          if len(github_targets) != 1:
+              raise RuntimeError(
+                  "Expected exactly one GitHub push mirror for this repository; "
+                  f"found {len(github_targets)}."
+              )
+
+          github_owner, github_repo = github_targets[0]
           github_api_url = (
-              f"https://api.github.com/repos/{github_user}/{github_repo}"
+              "https://api.github.com/repos/"
+              f"{urllib.parse.quote(github_owner, safe='')}/"
+              f"{urllib.parse.quote(github_repo, safe='')}"
           )
           github_headers = {
-              "Authorization": f"Bearer {github_token}",
+              "Authorization": f"Bearer {github_token.strip()}",
               "Accept": "application/vnd.github+json",
               "X-GitHub-Api-Version": "2022-11-28",
               "Content-Type": "application/json",
@@ -97,7 +127,6 @@ jobs:
               headers=github_headers,
               body={"description": source.get("description") or ""},
           )
-
           request_json(
               f"{github_api_url}/topics",
               method="PUT",
@@ -105,5 +134,5 @@ jobs:
               body={"names": source.get("topics") or []},
           )
 
-          print(f"Synced description and topics to {github_user}/{github_repo}.")
+          print(f"Synced description and topics to {github_owner}/{github_repo}.")
           PY
