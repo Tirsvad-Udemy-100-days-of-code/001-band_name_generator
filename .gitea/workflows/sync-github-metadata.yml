@@ -8,12 +8,14 @@ on:
 
 jobs:
   sync-metadata:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Sync description and topics
         env:
           GITEA_API_URL: ${{ gitea.api_url }}
-          GITEA_TOKEN: ${{ gitea.token }}
+          GITEA_CREDENTIALS: ${{ secrets.TOKEN_FOR_GITEA }}
           SOURCE_REPOSITORY: ${{ gitea.repository }}
           GITHUB_CREDENTIALS: ${{ secrets.CREDENTIALS_FOR_GITHUB }}
         run: |
@@ -62,6 +64,26 @@ jobs:
                   "CREDENTIALS_FOR_GITHUB must contain a non-empty GITHUB_PAT."
               )
 
+          raw_gitea_credentials = os.environ.get("GITEA_CREDENTIALS", "").strip()
+          if not raw_gitea_credentials:
+              raise RuntimeError("TOKEN_FOR_GITEA is missing or empty.")
+
+          try:
+              gitea_credentials = json.loads(raw_gitea_credentials)
+          except json.JSONDecodeError:
+              gitea_token = raw_gitea_credentials
+          else:
+              if isinstance(gitea_credentials, dict):
+                  gitea_token = gitea_credentials.get("GITEA_TOKEN")
+              elif isinstance(gitea_credentials, str):
+                  gitea_token = gitea_credentials
+              else:
+                  gitea_token = None
+
+          if not isinstance(gitea_token, str) or not gitea_token.strip():
+              raise RuntimeError(
+                  "TOKEN_FOR_GITEA must contain a non-empty GITEA_TOKEN."
+              )
           source_owner, separator, source_repo = os.environ[
               "SOURCE_REPOSITORY"
           ].partition("/")
@@ -71,7 +93,7 @@ jobs:
           gitea_api_url = os.environ["GITEA_API_URL"].rstrip("/")
           source_url = f"{gitea_api_url}/repos/{source_owner}/{source_repo}"
           gitea_headers = {
-              "Authorization": f"token {os.environ['GITEA_TOKEN']}",
+              "Authorization": f"token {gitea_token.strip()}",
               "Accept": "application/json",
           }
           source = request_json(source_url, headers=gitea_headers)
